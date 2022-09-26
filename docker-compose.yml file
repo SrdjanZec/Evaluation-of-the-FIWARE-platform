@@ -1,0 +1,118 @@
+version: "3.3" 
+services:
+         
+          mongo-db:
+            image: mongo:3.6
+            hostname: mongo-db
+            container_name: db-mongo
+            expose:
+             - "27017"
+            ports:
+             - "27017:27017"
+            networks:
+             - default
+            command: --bind_ip_all --smallfiles
+
+          orion:
+             image: fiware/orion:latest 
+             ports:
+                 - "1026:1026"
+             networks:
+                 - default
+             depends_on:
+                 - mongo-db
+             command: -dbhost mongo-db -logLevel DEBUG
+             healthcheck:
+                   test: ["CMD", "curl", "-f", "http://0.0.0.0:1026/version"]
+                   interval: 1m
+                   timeout: 10s
+                   retries: 3
+    
+          mqtt:
+            image: eclipse-mosquitto:1.6.14
+            container_name: mqtt
+            ports:
+              - "1883:1883"
+              - "9001:9001"
+            expose:
+              - "1883"
+              - "9001"
+            volumes:
+              - /opt/mosquitto/var/run:/var/run
+            networks:
+              - default
+            
+          agent:
+            image: fiware/iotagent-json:latest
+            hostname: agent
+            container_name: fiware-agent
+            depends_on:
+             - mongo-db
+             - mqtt
+            networks:
+             - default
+            expose:
+             - "4041"
+             - "7896"
+            ports:
+             - "4041:4041"
+             - "7896:7896"
+            environment:
+             - IOTA_CB_HOST=orion
+             - IOTA_CB_PORT=1026
+             - IOTA_NORTH_PORT=4041
+             - IOTA_REGISTRY_TYPE=mongodb
+             - IOTA_LOG_LEVEL=DEBUG
+             - IOTA_TIMESTAMP=true
+             - IOTA_CB_NGSI_VERSION=v2
+             - IOTA_AUTOCAST=true
+             - IOTA_MONGO_HOST=mongo-db
+             - IOTA_MONGO_PORT=27017
+             - IOTA_MONGO_DB=iotagentjson
+             - IOTA_PROVIDER_URL=http://localhost:4041
+             - IOTA_MQTT_HOST=mqtt
+             - IOTA_MQTT_PORT=1883
+             - IOTA_DEFAULT_TRANSPORT=MQTT
+             - IOTA_DEFAULT_RESOURCE=/iot/json
+
+          crate-db:
+              image: crate:latest
+              hostname: crate-db
+              container_name: crate-db
+              ports:
+                - "4200:4200"
+                - "4300:4300"
+                - "5432:5432"
+              command: crate -Cauth.host_based.enabled=false  -Ccluster.name=democluster -Chttp.cors.enabled=true -Chttp.cors.allow-origin="*"
+              networks:
+                - default
+              environment:
+                - CRATE_HEAP_SIZE=2g
+              volumes:
+                - /crate:/data
+ 
+          quantum-leap:
+               image: smartsdk/quantumleap
+               hostname: quantum-leap
+               ports:
+                - "8668:8668"
+               networks:
+                - default
+               depends_on:
+                - crate-db
+               environment:
+                - CRATE_HOST=crate-db
+
+          grafana:  
+            image: grafana/grafana:6.1.6
+            container_name: grafana
+            depends_on:
+             - crate-db
+            ports:
+             - "3003:3000"
+            networks:
+             - default
+            environment:
+             - GF_INSTALL_PLUGINS=https://github.com/orchestracities/grafana-map-plugin/archive/master.zip;grafana-map-plugin,grafana-clock-panel,grafana-worldmap-panel
+            volumes:
+             - ./grafana:/grafana/var/lib/grafana 
